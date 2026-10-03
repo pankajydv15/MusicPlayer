@@ -10,13 +10,6 @@ import { BottomPlayer } from '@/components/BottomPlayer';
 import { SleepTimerModal } from '@/components/SleepTimerModal';
 import { QueueDrawer } from '@/components/QueueDrawer';
 
-declare global {
-  interface Window {
-    onYouTubeIframeAPIReady: () => void;
-    YT: any;
-  }
-}
-
 type RepeatMode = 'off' | 'all' | 'one';
 
 interface Playlist {
@@ -55,8 +48,8 @@ export default function Home() {
   const [sleepTimerMinutes, setSleepTimerMinutes] = useState<number | null>(null);
   const [remainingTimerSeconds, setRemainingTimerSeconds] = useState<number | null>(null);
 
-  const playerRef = useRef<any>(null);
-  const progressTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // Native Audio Ref
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const sleepTimerIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const currentSongRef = useRef<Song | null>(null);
@@ -73,7 +66,7 @@ export default function Home() {
   useEffect(() => { isShuffleRef.current = isShuffle; }, [isShuffle]);
   useEffect(() => { repeatModeRef.current = repeatMode; }, [repeatMode]);
 
-  // Initial Load: Auto-fetch default songs so landing page is never empty
+  // Initial Load: Auto-fetch default songs
   useEffect(() => {
     executeSearch('Acoustic Unplugged');
   }, []);
@@ -91,7 +84,7 @@ export default function Home() {
     sleepTimerIntervalRef.current = setInterval(() => {
       setRemainingTimerSeconds((prev) => {
         if (prev === null || prev <= 1) {
-          playerRef.current?.pauseVideo();
+          audioRef.current?.pause();
           setIsPlaying(false);
           setSleepTimerMinutes(null);
           return null;
@@ -156,58 +149,6 @@ export default function Home() {
     localStorage.setItem('cb_favorites', JSON.stringify(updated));
   };
 
-  useEffect(() => {
-    if (!window.YT) {
-      const tag = document.createElement('script');
-      tag.src = 'https://www.youtube.com/iframe_api';
-      const firstScriptTag = document.getElementsByTagName('script')[0];
-      firstScriptTag?.parentNode?.insertBefore(tag, firstScriptTag);
-      window.onYouTubeIframeAPIReady = () => initPlayer();
-    } else {
-      initPlayer();
-    }
-    return () => {
-      if (progressTimerRef.current) clearInterval(progressTimerRef.current);
-    };
-  }, []);
-
-  const initPlayer = () => {
-    if (playerRef.current) return;
-    playerRef.current = new window.YT.Player('hidden-yt-player', {
-      height: '0',
-      width: '0',
-      playerVars: { autoplay: 0, controls: 0, playsinline: 1 },
-      events: {
-        onStateChange: (event: any) => {
-          if (event.data === 1) {
-            setIsPlaying(true);
-            setDuration(playerRef.current?.getDuration() || 0);
-            startTimer();
-          } else if (event.data === 2) {
-            setIsPlaying(false);
-            stopTimer();
-          } else if (event.data === 0) {
-            stopTimer();
-            handleSongEnd();
-          }
-        },
-      },
-    });
-  };
-
-  const startTimer = () => {
-    stopTimer();
-    progressTimerRef.current = setInterval(() => {
-      if (playerRef.current?.getCurrentTime) {
-        setCurrentTime(playerRef.current.getCurrentTime());
-      }
-    }, 500);
-  };
-
-  const stopTimer = () => {
-    if (progressTimerRef.current) clearInterval(progressTimerRef.current);
-  };
-
   const executeSearch = async (searchTerm: string) => {
     if (!searchTerm.trim()) return;
     setLoading(true);
@@ -223,11 +164,10 @@ export default function Home() {
     }
   };
 
-  const playSong = (song: Song) => {
+  const playSong = async (song: Song) => {
     setCurrentSong(song);
     setCurrentTime(0);
-    playerRef.current?.loadVideoById(song.id);
-    setIsPlaying(true);
+    setIsPlaying(false);
 
     setPlaybackQueue((prev) => {
       if (!prev.some((s) => s.id === song.id)) {
@@ -236,23 +176,38 @@ export default function Home() {
       return prev;
     });
 
-    if ('mediaSession' in navigator) {
-      navigator.mediaSession.metadata = new MediaMetadata({
-        title: song.title,
-        artist: song.artist,
-        artwork: [{ src: song.thumbnail, sizes: '512x512', type: 'image/jpeg' }],
-      });
-      navigator.mediaSession.setActionHandler('play', () => playerRef.current?.playVideo());
-      navigator.mediaSession.setActionHandler('pause', () => playerRef.current?.pauseVideo());
-      navigator.mediaSession.setActionHandler('nexttrack', playNextTrack);
-      navigator.mediaSession.setActionHandler('previoustrack', playPrevTrack);
+    try {
+      const res = await fetch(`/api/stream?id=${song.id}`);
+      const data = await res.json();
+
+      if (data.audioUrl && audioRef.current) {
+        audioRef.current.src = data.audioUrl;
+        audioRef.current.play().then(() => {
+          setIsPlaying(true);
+        }).catch((e) => console.error('Playback failed', e));
+
+        // Lock-screen controls via MediaSession
+        if ('mediaSession' in navigator) {
+          navigator.mediaSession.metadata = new MediaMetadata({
+            title: song.title,
+            artist: song.artist,
+            artwork: [{ src: song.thumbnail, sizes: '512x512', type: 'image/jpeg' }],
+          });
+          navigator.mediaSession.setActionHandler('play', () => audioRef.current?.play());
+          navigator.mediaSession.setActionHandler('pause', () => audioRef.current?.pause());
+          navigator.mediaSession.setActionHandler('nexttrack', playNextTrack);
+          navigator.mediaSession.setActionHandler('previoustrack', playPrevTrack);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load stream', err);
     }
   };
 
   const handleSongEnd = () => {
-    if (repeatModeRef.current === 'one' && currentSongRef.current) {
-      playerRef.current?.seekTo(0, true);
-      playerRef.current?.playVideo();
+    if (repeatModeRef.current === 'one' && audioRef.current) {
+      audioRef.current.currentTime = 0;
+      audioRef.current.play();
       return;
     }
     playNextTrack();
@@ -293,7 +248,23 @@ export default function Home() {
 
   return (
     <main className="max-w-xl mx-auto px-4 py-8 pb-44">
-      <div id="hidden-yt-player" className="hidden" />
+      {/* Native HTML5 Audio Tag for true mobile background/lock-screen playback */}
+      <audio
+        ref={audioRef}
+        onTimeUpdate={() => {
+          if (audioRef.current) {
+            setCurrentTime(audioRef.current.currentTime);
+          }
+        }}
+        onLoadedMetadata={() => {
+          if (audioRef.current) {
+            setDuration(audioRef.current.duration);
+          }
+        }}
+        onPlay={() => setIsPlaying(true)}
+        onPause={() => setIsPlaying(false)}
+        onEnded={handleSongEnd}
+      />
 
       {/* Header */}
       <Header
@@ -418,6 +389,7 @@ export default function Home() {
         </div>
       )}
 
+      {/* Playlist Inside View */}
       {activeTab === 'playlists' && activePlaylist && (
         <div className="mb-4">
           <button
@@ -528,8 +500,10 @@ export default function Home() {
           repeatMode={repeatMode}
           isTimerActive={sleepTimerMinutes !== null}
           onTogglePlay={() => {
-            if (isPlaying) playerRef.current?.pauseVideo();
-            else playerRef.current?.playVideo();
+            if (audioRef.current) {
+              if (isPlaying) audioRef.current.pause();
+              else audioRef.current.play();
+            }
           }}
           onNext={playNextTrack}
           onPrev={playPrevTrack}
@@ -543,8 +517,10 @@ export default function Home() {
           onOpenQueueDrawer={() => setIsQueueOpen(true)}
           onSeek={(e) => {
             const target = Number(e.target.value);
-            playerRef.current?.seekTo(target, true);
-            setCurrentTime(target);
+            if (audioRef.current) {
+              audioRef.current.currentTime = target;
+              setCurrentTime(target);
+            }
           }}
         />
       )}
