@@ -1,0 +1,16 @@
+{
+  "name": "Cloud Beats",
+  "short_name": "CloudBeats",
+  "description": "Minimalist personal music player with background playback",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#09090b",
+  "theme_color": "#09090b",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
