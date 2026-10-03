@@ -2,10 +2,12 @@
 
 import { Heart, Plus } from 'lucide-react';
 import { Song } from '@/types/song';
+import { EqualizerBars } from './EqualizerBars';
 
 interface TrackItemProps {
   song: Song;
   isSelected: boolean;
+  isPlaying: boolean; // Ye missing tha TypeScript interface me
   isFav: boolean;
   onPlay: (song: Song) => void;
   onToggleFav: (e: React.MouseEvent, song: Song) => void;
@@ -15,6 +17,7 @@ interface TrackItemProps {
 export function TrackItem({
   song,
   isSelected,
+  isPlaying,
   isFav,
   onPlay,
   onToggleFav,
@@ -29,11 +32,19 @@ export function TrackItem({
           : 'bg-zinc-900/60 hover:bg-zinc-800/50 border border-transparent'
       }`}
     >
-      <img
-        src={song.thumbnail || '/icon.svg'}
-        alt={song.title}
-        className="w-12 h-12 rounded-lg object-cover bg-zinc-800 flex-shrink-0"
-      />
+      <div className="relative w-12 h-12 flex-shrink-0">
+        <img
+          src={song.thumbnail || '/icon.svg'}
+          alt={song.title}
+          className="w-12 h-12 rounded-lg object-cover bg-zinc-800"
+        />
+        {isSelected && (
+          <div className="absolute inset-0 bg-black/60 rounded-lg flex items-center justify-center backdrop-blur-[1px]">
+            <EqualizerBars isPlaying={isPlaying} />
+          </div>
+        )}
+      </div>
+
       <div className="flex-1 min-w-0">
         <h2 className={`text-sm font-medium truncate ${isSelected ? 'text-sky-400' : 'text-zinc-200'}`}>
           {song.title}
